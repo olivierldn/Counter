@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Million Counter</title>
+  <style>
+    body {
+      background: transparent; /* so PRISM shows only text/bar */
+      color: white;
+      font-family: Arial, sans-serif;
+      text-align: center;
+      margin-top: 50px;
+    }
+    #count {
+      font-size: 60px;
+      font-weight: bold;
+    }
+    #barContainer {
+      width: 80%;
+      height: 30px;
+      background: rgba(255,255,255,0.2);
+      margin: 30px auto;
+      border-radius: 15px;
+      overflow: hidden;
+    }
+    #bar {
+      height: 100%;
+      width: 0%;
+      background: limegreen;
+      transition: width 0.3s;
+    }
+    button {
+      font-size: 20px;
+      margin: 10px;
+      padding: 10px 20px;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+    }
+    #plus { background: #4CAF50; color: white; }
+    #minus { background: #f44336; color: white; }
+  </style>
+</head>
+<body>
+  <div id="count">0</div>
+  <div id="barContainer"><div id="bar"></div></div>
+  <button id="minus">-</button>
+  <button id="plus">+</button>
+
+  <script>
+    let count = 0;
+    const max = 1000000; // goal
+    const countEl = document.getElementById("count");
+    const bar = document.getElementById("bar");
+
+    function updateDisplay() {
+      countEl.textContent = count.toLocaleString();
+      let pct = Math.min(100, (count / max) * 100);
+      bar.style.width = pct + "%";
+    }
+
+    document.getElementById("plus").onclick = () => {
+      if (count < max) count++;
+      updateDisplay();
+    };
+
+    document.getElementById("minus").onclick = () => {
+      if (count > 0) count--;
+      updateDisplay();
+    };
+
+    updateDisplay();
+  </script>
+</body>
+</html>
