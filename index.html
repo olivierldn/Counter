@@ -1,111 +1,186 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Live Counter (Overlay + Invisible Controls)</title>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Live Counter (with negatives, admin buttons)</title>
 <style>
-  :root { --fg:#fff; --bg:rgba(0,0,0,0); --barbg:rgba(255,255,255,.2); --barfg:#00e676; }
-  html,body{margin:0;padding:0;background:var(--bg);color:var(--fg);font-family:Arial,Helvetica,sans-serif;}
+  :root{
+    --fg:#ffffff; --bg:rgba(0,0,0,0);                  /* transparent for PRISM */
+    --barbg:rgba(255,255,255,.25); --barfg:#00e676;
+    --btn:#222; --btnTxt:#fff; --btnPlus:#2e7d32; --btnMinus:#c62828;
+  }
+  html,body{margin:0;padding:0;background:var(--bg);color:var(--fg);font-family:Arial,Helvetica,sans-serif}
   .wrap{min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:24px}
-  #count{font-size:clamp(42px,9vw,110px);font-weight:900;line-height:1;text-align:center}
-  .barWrap{width:min(90vw,820px);height:28px;border-radius:16px;overflow:hidden;background:var(--barbg)}
+  #count{font-size:clamp(48px,9vw,120px);font-weight:900;line-height:1;text-align:center;text-shadow:0 0 10px rgba(0,0,0,.35)}
+  .barWrap{width:min(92vw,860px);height:28px;border-radius:16px;overflow:hidden;background:var(--barbg)}
   .bar{height:100%;width:0%;background:var(--barfg);transition:width .2s}
-  /* Invisible tap zones (only enabled in admin mode). They're transparent on stream. */
-  .tapzone{position:fixed;top:0;bottom:0;width:45vw;z-index:9;opacity:0;pointer-events:none;}
-  .left{left:0;} .right{right:0;}
-  .hint{font-size:13px;opacity:.7;text-align:center}
+  #controls{display:flex;gap:12px;flex-wrap:wrap;align-items:center;justify-content:center}
+  button{border:0;border-radius:12px;padding:14px 18px;font-size:20px;cursor:pointer;color:var(--btnTxt);background:var(--btn)}
+  .plus{background:var(--btnPlus)} .minus{background:var(--btnMinus)}
+  .step{font-size:16px;opacity:.95}
+  .hint{font-size:13px;opacity:.75;text-align:center}
   .hidden{display:none!important}
+  input[type=number]{width:150px;padding:10px;border-radius:10px;border:0;font-size:18px;color:#111}
+  .row{display:flex;gap:12px;flex-wrap:wrap;align-items:center;justify-content:center}
+  .label{font-size:14px;opacity:.9}
 </style>
 </head>
 <body>
   <div class="wrap">
     <div id="count">0</div>
     <div class="barWrap"><div id="bar" class="bar"></div></div>
-    <div id="hint" class="hint hidden">Admin mode: tap LEFT = –100, tap RIGHT = +100. (Hold = repeat)</div>
+
+    <!-- Admin-only controls -->
+    <div id="controls" class="hidden">
+      <div class="row">
+        <button class="minus" data-delta="-1">–1</button>
+        <button class="plus"  data-delta="1">+1</button>
+        <button class="minus" data-delta="-100">–100</button>
+        <button class="plus"  data-delta="100">+100</button>
+        <button class="minus" data-delta="-1000">–1k</button>
+        <button class="plus"  data-delta="1000">+1k</button>
+        <button class="step" id="reset">Reset</button>
+      </div>
+
+      <div class="row">
+        <span class="label">Jump:</span>
+        <input id="jumpVal" type="number" value="5000" step="100" />
+        <button class="minus step" id="jumpMinus">–Jump</button>
+        <button class="plus  step" id="jumpPlus">+Jump</button>
+      </div>
+
+      <div class="row">
+        <span class="label">Set to:</span>
+        <input id="setVal" type="number" value="-48000" step="1" />
+        <button class="step" id="saveSet">Save</button>
+        <span class="label">Goal (max):</span>
+        <input id="maxVal" type="number" value="1000000" step="1000" min="1" />
+        <button class="step" id="saveMax">Save Goal</button>
+      </div>
+    </div>
+
+    <div id="hint" class="hint hidden">
+      Admin mode. Use the buttons above. Add <code>?view=overlay</code> for a clean PRISM view.
+    </div>
   </div>
 
-  <!-- Transparent, clickable areas (activated only in admin mode) -->
-  <div id="tapMinus" class="tapzone left"></div>
-  <div id="tapPlus"  class="tapzone right"></div>
+  <!-- Firebase v9 (modular) via CDN -->
+  <script type="module">
+    /* ====== Your Firebase config ====== */
+    const firebaseConfig = {
+      apiKey: "AIzaSyA3WKG1M0Oz9D-M2Gk2pNvVCJHKBtmKBhQ",
+      authDomain: "counter-ce57f.firebaseapp.com",
+      databaseURL: "https://counter-ce57f-default-rtdb.firebaseio.com",
+      projectId: "counter-ce57f",
+      storageBucket: "counter-ce57f.appspot.com",
+      messagingSenderId: "1095050493509",
+      appId: "1:1095050493509:web:e579b9a178dc9fe763ad2c",
+      measurementId: "G-8V0GQRBTFP"
+    };
 
-<script type="module">
-  /* ===== 1) FILL YOUR FIREBASE CONFIG ===== */
-  const firebaseConfig = {
-    apiKey: "YOUR_API_KEY",
-    authDomain: "YOUR_PROJECT_ID.firebaseapp.com",
-    databaseURL: "https://YOUR_PROJECT_ID-default-rtdb.firebaseio.com",
-    projectId: "YOUR_PROJECT_ID",
-    storageBucket: "YOUR_PROJECT_ID.appspot.com",
-    messagingSenderId: "YOUR_SENDER_ID",
-    appId: "YOUR_APP_ID"
-  };
-  /* ===== 2) EDIT GOAL / STEP IF YOU WANT ===== */
-  const GOAL_MAX = 1000000;
-  const TAP_STEP = 100;      // each tap changes by ±100
-  const HOLD_SPEED = 80;     // ms between repeats while holding
+    /* ====== Options you can change ====== */
+    const DB_PATH   = "counters/million";   // where it stores in Realtime DB
+    const ADMIN_KEY = "OLI123";             // secret for admin buttons (?admin=OLI123)
 
-  import { initializeApp } from "https://www.gstatic.com/firebasejs/9.23.0/firebase-app.js";
-  import { getDatabase, ref, onValue, runTransaction, set } from "https://www.gstatic.com/firebasejs/9.23.0/firebase-database.js";
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/9.23.0/firebase-app.js";
+    import { getDatabase, ref, onValue, runTransaction, set, get } from "https://www.gstatic.com/firebasejs/9.23.0/firebase-database.js";
 
-  const app = initializeApp(firebaseConfig);
-  const db  = getDatabase(app);
-  const path = "counters/million";              // change if you want multiple counters
-  const counterRef = ref(db, path);
+    const app = initializeApp(firebaseConfig);
+    const db  = getDatabase(app);
+    const counterRef = ref(db, DB_PATH);
 
-  const countEl = document.getElementById("count");
-  const barEl   = document.getElementById("bar");
-  const hintEl  = document.getElementById("hint");
-  const tapMinus= document.getElementById("tapMinus");
-  const tapPlus = document.getElementById("tapPlus");
+    const qs       = new URLSearchParams(location.search);
+    const isAdmin  = (qs.get("admin")||"") === ADMIN_KEY;
+    const overlay  = (qs.get("view")||"").toLowerCase()==="overlay";
+    const initFrom = qs.get("start");   // optional init from URL (e.g. ?start=-48000)
+    const maxFrom  = qs.get("max");     // optional goal override (e.g. ?max=2000000)
 
-  const qs = new URLSearchParams(location.search);
-  const isOverlay = (qs.get("view")||"").toLowerCase()==="overlay";
-  const adminKey  = qs.get("admin") || "";
-  const REQUIRED_KEY = "YOURSECRET";   // <<< set your secret here
+    const countEl  = document.getElementById("count");
+    const barEl    = document.getElementById("bar");
+    const controls = document.getElementById("controls");
+    const hintEl   = document.getElementById("hint");
+    const jumpVal  = document.getElementById("jumpVal");
+    const setVal   = document.getElementById("setVal");
+    const saveSet  = document.getElementById("saveSet");
+    const maxVal   = document.getElementById("maxVal");
+    const saveMax  = document.getElementById("saveMax");
 
-  // Only enable invisible tap zones if the key matches
-  const adminMode = adminKey === REQUIRED_KEY;
+    if (isAdmin) { controls.classList.remove("hidden"); if (!overlay) hintEl.classList.remove("hidden"); }
 
-  function render(n=0){
-    countEl.textContent = Number(n).toLocaleString();
-    barEl.style.width = Math.max(0, Math.min(100, (n/GOAL_MAX)*100)) + "%";
-  }
-
-  onValue(counterRef, (snap)=>{
-    const val = snap.val();
-    if (!val || typeof val.count!=="number") { set(counterRef,{count:0}); render(0); }
-    else render(val.count);
-  });
-
-  function changeBy(delta){
-    runTransaction(counterRef, (cur)=>{
-      const c = (cur && typeof cur.count==="number") ? cur.count : 0;
-      return { count: Math.max(0, Math.min(GOAL_MAX, c + delta)) };
-    });
-  }
-
-  // Activate invisible tap zones for admin only
-  if (adminMode) {
-    [tapMinus, tapPlus].forEach(z=>{ z.style.pointerEvents = "auto"; });
-    hintEl.classList.toggle("hidden", isOverlay); // show hint only if not forced overlay
-
-    function holdRepeat(el, delta){
-      let t=null; const step=()=>{ changeBy(delta); t=setTimeout(step, HOLD_SPEED); };
-      el.addEventListener("touchstart", e=>{ e.preventDefault(); step(); }, {passive:false});
-      el.addEventListener("mousedown",  e=>{ e.preventDefault(); step(); });
-      ["touchend","touchcancel","mouseup","mouseleave"].forEach(evt=>{
-        el.addEventListener(evt, ()=>{ if(t){clearTimeout(t); t=null;} });
-      });
-      // single taps
-      el.addEventListener("click", ()=> changeBy(delta));
+    function render(c=0, max=1000000){
+      countEl.textContent = Number(c).toLocaleString();
+      maxVal.value = max;
+      setVal.value = c;
+      // Progress bar shows 0% for negatives, 100% at >= max
+      const pct = Math.max(0, Math.min(100, (c/Math.max(1,max))*100));
+      barEl.style.width = pct + "%";
     }
-    holdRepeat(tapMinus, -TAP_STEP);
-    holdRepeat(tapPlus,  +TAP_STEP);
-  } else {
-    // not admin: make sure zones can't be clicked
-    [tapMinus, tapPlus].forEach(z=>{ z.style.pointerEvents = "none"; });
-  }
-</script>
+
+    async function ensureInit(){
+      const snap = await get(counterRef);
+      if (!snap.exists()) {
+        const start = parseInt(initFrom ?? "-48000", 10) || -48000;    // default –48,000
+        const goal  = Math.max(1, parseInt(maxFrom ?? "1000000", 10) || 1000000);
+        await set(counterRef, { count: start, max: goal });
+      } else if (maxFrom) {
+        const v = snap.val() || {};
+        const goal = Math.max(1, parseInt(maxFrom, 10) || 1000000);
+        await set(counterRef, { count: (typeof v.count==="number"?v.count:0), max: goal });
+      }
+    }
+
+    await ensureInit();
+
+    onValue(counterRef, (snap)=>{
+      const v = snap.val() || {};
+      render(typeof v.count==="number" ? v.count : 0,
+             typeof v.max==="number"   ? v.max   : 1000000);
+    });
+
+    function changeBy(delta){
+      runTransaction(counterRef, (cur)=>{
+        const c = (cur && typeof cur.count==="number") ? cur.count : 0;
+        const m = (cur && typeof cur.max==="number")   ? cur.max   : 1000000;
+        // allow negatives; clamp only to +max on the high end
+        let next = c + delta;
+        if (next > m) next = m;
+        return { count: next, max: m };
+      });
+    }
+    function setTo(value){
+      runTransaction(counterRef, (cur)=>{
+        const m = (cur && typeof cur.max==="number") ? cur.max : 1000000;
+        let next = value;      // allow negatives
+        if (next > m) next = m;
+        return { count: next, max: m };
+      });
+    }
+    function setMax(value){
+      runTransaction(counterRef, (cur)=>{
+        const c = (cur && typeof cur.count==="number") ? cur.count : 0;
+        const m = Math.max(1, value);
+        // if current > new max, bring it down to max (negatives remain allowed)
+        const fixed = Math.min(c, m);
+        return { count: fixed, max: m };
+      });
+    }
+
+    if (isAdmin) {
+      controls.addEventListener("click", (e)=>{
+        const btn = e.target.closest("button");
+        if (!btn) return;
+
+        if (btn.id === "reset")   { set(counterRef, { count: 0, max: Number(maxVal.value)||1000000 }); return; }
+        if (btn.id === "jumpMinus"){ changeBy(-Math.abs(parseInt(jumpVal.value||"0",10)||0)); return; }
+        if (btn.id === "jumpPlus") { changeBy(+Math.abs(parseInt(jumpVal.value||"0",10)||0)); return; }
+        if (btn.id === "saveSet")  { setTo(parseInt(setVal.value||"0",10) || 0); return; }
+        if (btn.id === "saveMax")  { setMax(Math.max(1, parseInt(maxVal.value||"1",10)||1)); return; }
+
+        const delta = Number(btn.dataset.delta || 0);
+        if (!isNaN(delta) && delta !== 0) changeBy(delta);
+      });
+    }
+  </script>
 </body>
 </html>
