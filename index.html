@@ -1,75 +1,111 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <title>Million Counter</title>
-  <style>
-    body {
-      background: transparent; /* so PRISM shows only text/bar */
-      color: white;
-      font-family: Arial, sans-serif;
-      text-align: center;
-      margin-top: 50px;
-    }
-    #count {
-      font-size: 60px;
-      font-weight: bold;
-    }
-    #barContainer {
-      width: 80%;
-      height: 30px;
-      background: rgba(255,255,255,0.2);
-      margin: 30px auto;
-      border-radius: 15px;
-      overflow: hidden;
-    }
-    #bar {
-      height: 100%;
-      width: 0%;
-      background: limegreen;
-      transition: width 0.3s;
-    }
-    button {
-      font-size: 20px;
-      margin: 10px;
-      padding: 10px 20px;
-      border: none;
-      border-radius: 8px;
-      cursor: pointer;
-    }
-    #plus { background: #4CAF50; color: white; }
-    #minus { background: #f44336; color: white; }
-  </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Live Counter (Overlay + Invisible Controls)</title>
+<style>
+  :root { --fg:#fff; --bg:rgba(0,0,0,0); --barbg:rgba(255,255,255,.2); --barfg:#00e676; }
+  html,body{margin:0;padding:0;background:var(--bg);color:var(--fg);font-family:Arial,Helvetica,sans-serif;}
+  .wrap{min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:24px}
+  #count{font-size:clamp(42px,9vw,110px);font-weight:900;line-height:1;text-align:center}
+  .barWrap{width:min(90vw,820px);height:28px;border-radius:16px;overflow:hidden;background:var(--barbg)}
+  .bar{height:100%;width:0%;background:var(--barfg);transition:width .2s}
+  /* Invisible tap zones (only enabled in admin mode). They're transparent on stream. */
+  .tapzone{position:fixed;top:0;bottom:0;width:45vw;z-index:9;opacity:0;pointer-events:none;}
+  .left{left:0;} .right{right:0;}
+  .hint{font-size:13px;opacity:.7;text-align:center}
+  .hidden{display:none!important}
+</style>
 </head>
 <body>
-  <div id="count">0</div>
-  <div id="barContainer"><div id="bar"></div></div>
-  <button id="minus">-</button>
-  <button id="plus">+</button>
+  <div class="wrap">
+    <div id="count">0</div>
+    <div class="barWrap"><div id="bar" class="bar"></div></div>
+    <div id="hint" class="hint hidden">Admin mode: tap LEFT = –100, tap RIGHT = +100. (Hold = repeat)</div>
+  </div>
 
-  <script>
-    let count = 0;
-    const max = 1000000; // goal
-    const countEl = document.getElementById("count");
-    const bar = document.getElementById("bar");
+  <!-- Transparent, clickable areas (activated only in admin mode) -->
+  <div id="tapMinus" class="tapzone left"></div>
+  <div id="tapPlus"  class="tapzone right"></div>
 
-    function updateDisplay() {
-      countEl.textContent = count.toLocaleString();
-      let pct = Math.min(100, (count / max) * 100);
-      bar.style.width = pct + "%";
+<script type="module">
+  /* ===== 1) FILL YOUR FIREBASE CONFIG ===== */
+  const firebaseConfig = {
+    apiKey: "YOUR_API_KEY",
+    authDomain: "YOUR_PROJECT_ID.firebaseapp.com",
+    databaseURL: "https://YOUR_PROJECT_ID-default-rtdb.firebaseio.com",
+    projectId: "YOUR_PROJECT_ID",
+    storageBucket: "YOUR_PROJECT_ID.appspot.com",
+    messagingSenderId: "YOUR_SENDER_ID",
+    appId: "YOUR_APP_ID"
+  };
+  /* ===== 2) EDIT GOAL / STEP IF YOU WANT ===== */
+  const GOAL_MAX = 1000000;
+  const TAP_STEP = 100;      // each tap changes by ±100
+  const HOLD_SPEED = 80;     // ms between repeats while holding
+
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/9.23.0/firebase-app.js";
+  import { getDatabase, ref, onValue, runTransaction, set } from "https://www.gstatic.com/firebasejs/9.23.0/firebase-database.js";
+
+  const app = initializeApp(firebaseConfig);
+  const db  = getDatabase(app);
+  const path = "counters/million";              // change if you want multiple counters
+  const counterRef = ref(db, path);
+
+  const countEl = document.getElementById("count");
+  const barEl   = document.getElementById("bar");
+  const hintEl  = document.getElementById("hint");
+  const tapMinus= document.getElementById("tapMinus");
+  const tapPlus = document.getElementById("tapPlus");
+
+  const qs = new URLSearchParams(location.search);
+  const isOverlay = (qs.get("view")||"").toLowerCase()==="overlay";
+  const adminKey  = qs.get("admin") || "";
+  const REQUIRED_KEY = "YOURSECRET";   // <<< set your secret here
+
+  // Only enable invisible tap zones if the key matches
+  const adminMode = adminKey === REQUIRED_KEY;
+
+  function render(n=0){
+    countEl.textContent = Number(n).toLocaleString();
+    barEl.style.width = Math.max(0, Math.min(100, (n/GOAL_MAX)*100)) + "%";
+  }
+
+  onValue(counterRef, (snap)=>{
+    const val = snap.val();
+    if (!val || typeof val.count!=="number") { set(counterRef,{count:0}); render(0); }
+    else render(val.count);
+  });
+
+  function changeBy(delta){
+    runTransaction(counterRef, (cur)=>{
+      const c = (cur && typeof cur.count==="number") ? cur.count : 0;
+      return { count: Math.max(0, Math.min(GOAL_MAX, c + delta)) };
+    });
+  }
+
+  // Activate invisible tap zones for admin only
+  if (adminMode) {
+    [tapMinus, tapPlus].forEach(z=>{ z.style.pointerEvents = "auto"; });
+    hintEl.classList.toggle("hidden", isOverlay); // show hint only if not forced overlay
+
+    function holdRepeat(el, delta){
+      let t=null; const step=()=>{ changeBy(delta); t=setTimeout(step, HOLD_SPEED); };
+      el.addEventListener("touchstart", e=>{ e.preventDefault(); step(); }, {passive:false});
+      el.addEventListener("mousedown",  e=>{ e.preventDefault(); step(); });
+      ["touchend","touchcancel","mouseup","mouseleave"].forEach(evt=>{
+        el.addEventListener(evt, ()=>{ if(t){clearTimeout(t); t=null;} });
+      });
+      // single taps
+      el.addEventListener("click", ()=> changeBy(delta));
     }
-
-    document.getElementById("plus").onclick = () => {
-      if (count < max) count++;
-      updateDisplay();
-    };
-
-    document.getElementById("minus").onclick = () => {
-      if (count > 0) count--;
-      updateDisplay();
-    };
-
-    updateDisplay();
-  </script>
+    holdRepeat(tapMinus, -TAP_STEP);
+    holdRepeat(tapPlus,  +TAP_STEP);
+  } else {
+    // not admin: make sure zones can't be clicked
+    [tapMinus, tapPlus].forEach(z=>{ z.style.pointerEvents = "none"; });
+  }
+</script>
 </body>
 </html>
